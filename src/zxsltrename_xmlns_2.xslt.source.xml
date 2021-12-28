@@ -1,0 +1,90 @@
+<xsl:transform xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:sap="http://www.sap.com/sapxsl" version="1.0">
+
+  <xsl:strip-space elements="*"/>
+
+  <xsl:variable name="new" select="'new'"/>
+
+  <xsl:template match="/">
+    <xsl:apply-templates select="*|text()|@*"/>
+  </xsl:template>
+
+  <xsl:template match="*">
+    <xsl:choose>
+      <xsl:when test="name()!=local-name()">
+        <xsl:element name="{$new}{name()}" namespace="{namespace-uri()}">
+          <xsl:apply-templates select="*|text()|@*"/>
+        </xsl:element>
+      </xsl:when>
+      <xsl:when test="contains(name(),':')">
+        <xsl:element name="{$new}:{name()}" namespace="{namespace-uri()}">
+          <xsl:apply-templates select="*|text()|@*"/>
+        </xsl:element>
+      </xsl:when>
+      <xsl:otherwise>
+        <xsl:element name="{name()}" namespace="{namespace-uri()}">
+          <xsl:apply-templates select="*|text()|@*"/>
+        </xsl:element>
+      </xsl:otherwise>
+    </xsl:choose>
+  </xsl:template>
+
+  <xsl:template match="text()">
+    <xsl:value-of select="."/>
+  </xsl:template>
+
+  <xsl:template match="@*">
+    <xsl:variable name="AttributeValue">
+      <xsl:value-of select="string(.)"/>
+    </xsl:variable>
+    <xsl:choose>
+      <xsl:when test="starts-with(name(),'xmlns:')">
+        <xsl:attribute name="xmlns:{$new}{substring-after(name(),'xmlns:')}" namespace="{namespace-uri()}">
+          <xsl:value-of select="concat($new,$AttributeValue)"/>
+        </xsl:attribute>
+      </xsl:when>
+      <xsl:when test="name()!=local-name() and starts-with(name(),'xml')">
+        <xsl:attribute name="{name()}">
+          <xsl:value-of select="$AttributeValue"/>
+        </xsl:attribute>
+      </xsl:when>
+      <xsl:when test="local-name()='Ignorable' and namespace-uri()='http://schemas.openxmlformats.org/markup-compatibility/2006'">
+        <xsl:attribute name="{local-name()}" namespace="{$new}{namespace-uri()}">
+          <xsl:value-of select="concat($new,$AttributeValue)"/>
+        </xsl:attribute>
+        <xsl:variable name="Namespace">
+          <xsl:value-of select="namespace-uri(//*/@*[substring-before(name(),':')=$AttributeValue][1])"/>
+        </xsl:variable>
+        <xsl:attribute name="{$new}{$AttributeValue}:dummy" namespace="{$Namespace}"/>
+      </xsl:when>
+      <xsl:when test="local-name()='Requires' and local-name(..)='Choice' and namespace-uri(..)='http://schemas.openxmlformats.org/markup-compatibility/2006'">
+        <xsl:attribute name="{local-name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="concat($new,$AttributeValue)"/>
+        </xsl:attribute>
+        <xsl:variable name="Namespace2">
+          <xsl:value-of select="namespace-uri(//*/@*[substring-before(name(),':')=$AttributeValue])"/>
+        </xsl:variable>
+        <xsl:attribute name="{$new}{$AttributeValue}:dummy" namespace="http://schemas.microsoft.com/office/drawing/2007/8/2/chart"/>
+        <!--<xsl:attribute name="{$new}{$AttributeValue}:dummy" namespace="{$Namespace2}"/>-->
+      </xsl:when>
+      <xsl:when test="local-name()='type' and namespace-uri()='http://www.w3.org/2001/XMLSchema-instance'">
+        <xsl:value-of select="concat($new,$AttributeValue)"/>
+      </xsl:when>
+      <xsl:when test="name()!=local-name()">
+        <xsl:attribute name="{$new}{name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="$AttributeValue"/>
+        </xsl:attribute>
+      </xsl:when>
+      <xsl:when test="namespace-uri()=''">
+        <xsl:attribute name="{name()}">
+          <xsl:value-of select="$AttributeValue"/>
+        </xsl:attribute>
+      </xsl:when>
+      <xsl:otherwise>
+        <xsl:attribute name="{$new}:{name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="$AttributeValue"/>
+        </xsl:attribute>
+      </xsl:otherwise>
+    </xsl:choose>
+  </xsl:template>
+
+</xsl:transform>
