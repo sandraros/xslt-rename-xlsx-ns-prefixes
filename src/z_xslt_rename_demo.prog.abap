@@ -46,6 +46,14 @@ CLASS lcl_zip_rename_xmlns_prefixes DEFINITION.
         VALUE(result) TYPE xstring
       RAISING
         cx_static_check.
+  PRIVATE SECTION.
+
+    METHODS add_dummy_attrib_orphan_xmlns
+      CHANGING
+        xml TYPE string.
+    METHODS del_dummy_attrib_orphan_xmlns
+      CHANGING
+        xml TYPE string.
 ENDCLASS.
 
 CLASS lcl_zip_rename_xmlns_prefixes IMPLEMENTATION.
@@ -76,36 +84,64 @@ CLASS lcl_zip_rename_xmlns_prefixes IMPLEMENTATION.
 
       TRY.
 
-IF 1 = 1
-*and <ls_zip_file>-name NP '*hart*'
-and <ls_zip_file>-name NP '*rawi*'
-*and <ls_zip_file>-name NP '*heet*'
-*and <ls_zip_file>-name NP '*workbook*'
-*and <ls_zip_file>-name NP '*xl*'
-and <ls_zip_file>-name NP '*docprops*'
-*and <ls_zip_file>-name NP '*rels*'
-*and <ls_zip_file>-name NP '*content_types*'
-.
-          CALL TRANSFORMATION zxsltrename_xmlns_2 SOURCE XML l_content RESULT XML data(l_content_2).
-          l_content = l_content_2.
-ENDIF.
+          " dummy parsing just to check whether it's XML
+          DATA(l_content_text) = VALUE string( ).
+          CALL TRANSFORMATION id SOURCE XML l_content RESULT XML l_content_text.
+
+          " no exception -> it's XML
+          TRY.
+              add_dummy_attrib_orphan_xmlns( CHANGING xml = l_content_text ).
+
+              DATA(l_content_2) = VALUE string( ).
+              CALL TRANSFORMATION zxsltrename_xmlns_2 SOURCE XML l_content_text RESULT XML l_content_2.
+              del_dummy_attrib_orphan_xmlns( CHANGING xml = l_content_2 ).
+
+              CALL TRANSFORMATION id SOURCE XML l_content_2 RESULT XML l_content.
+
+            CATCH cx_root INTO DATA(error2).
+              RAISE EXCEPTION error2.
+          ENDTRY.
 
         CATCH cx_xslt_runtime_error INTO DATA(error1).
-          if error1->textid <> error1->bad_source_context.
+          " exception -> it's not XML (image, etc.), just continue (except if it's invalid XML)
+          IF error1->textid <> error1->bad_source_context.
             RAISE EXCEPTION error1.
-          endif.
+          ENDIF.
       ENDTRY.
 
-          result_zip->add(
-            EXPORTING
-              name           = <ls_zip_file>-name
-              content        = l_content ).
+      result_zip->add(
+        EXPORTING
+          name           = <ls_zip_file>-name
+          content        = l_content ).
 
     ENDLOOP.
 
     result = result_zip->save( ).
 
   ENDMETHOD.
+
+
+  METHOD add_dummy_attrib_orphan_xmlns.
+    " Excel needs xmlns:xr3="..." with mc:Ignorable="xr3 xr4" in Excel sheet#.xml, XSLT/XPath cannot
+    "   read xmlns:xxxx if there's no element/attribute referencing the xxxx prefix, so adding dummy
+    "   attributes here. All prefixes of Ignorable must be known at that node (or parent node, probably).
+    FIND ALL OCCURRENCES OF REGEX '[^a-zA-Z]xmlns:([^=]+)="[^"]+"' IN xml RESULTS DATA(matches).
+    SORT matches BY offset DESCENDING.
+    LOOP AT matches ASSIGNING FIELD-SYMBOL(<match>).
+      DATA(namespace_prefix) = CONV string( LET <submatch> = <match>-submatches[ 1 ] IN xml+<submatch>-offset(<submatch>-length) ).
+      DATA(offset) = <match>-offset + <match>-length.
+      REPLACE SECTION OFFSET offset LENGTH 0 OF xml WITH | { namespace_prefix }:dummy=""|.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD del_dummy_attrib_orphan_xmlns.
+    " Excel fails if it finds /cp:coreProperties[@xx:dummy=""] with xmlns:xx="http://purl.org/dc/dcmitype/"
+    " in Props/core.xml, so removing all attributes added by method add_dummy_attrib_orphan_xmlns.
+    REPLACE ALL OCCURRENCES OF ` dummy=""` IN xml WITH ``.
+    REPLACE ALL OCCURRENCES OF REGEX ` new[^: <>]+:dummy=""` IN xml WITH ``.
+  ENDMETHOD.
+
 ENDCLASS.
 
 CLASS zcl_zip_cleanup_for_diff DEFINITION
@@ -267,8 +303,6 @@ CLASS lcl_app IMPLEMENTATION.
     APPEND '23_Sheets_with_and_without_grid_lines.xlsx' TO result.
     APPEND '24_Sheets_with_different_default_date_formats.xlsx' TO result.
     APPEND '27_ConditionalFormatting.xlsx' TO result.
-*    APPEND '28_HelloWorld_Sheet2.csv' TO result.
-*    APPEND '28_HelloWorld_Sheet1.csv' TO result.
     APPEND '30_CellDataTypes.xlsx' TO result.
     APPEND '31_AutosizeWithDifferentFontSizes.xlsx' TO result.
     APPEND '33_autofilter.xlsx' TO result.
