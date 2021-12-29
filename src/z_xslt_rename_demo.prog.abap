@@ -38,14 +38,18 @@ CLASS lcl_app DEFINITION FINAL.
 ENDCLASS.
 
 CLASS lcl_zip_rename_xmlns_prefixes DEFINITION.
+
   PUBLIC SECTION.
+
     METHODS rename
       IMPORTING
-        zip_xstring   TYPE xstring
+        zip_xstring             TYPE xstring
+        namespace_prefix_prefix TYPE string
       RETURNING
-        VALUE(result) TYPE xstring
+        VALUE(result)           TYPE xstring
       RAISING
         cx_static_check.
+
   PRIVATE SECTION.
 
     METHODS add_dummy_attrib_orphan_xmlns
@@ -54,11 +58,16 @@ CLASS lcl_zip_rename_xmlns_prefixes DEFINITION.
     METHODS del_dummy_attrib_orphan_xmlns
       CHANGING
         xml TYPE string.
+
+    DATA: namespace_prefix_prefix TYPE string.
+
 ENDCLASS.
 
 CLASS lcl_zip_rename_xmlns_prefixes IMPLEMENTATION.
 
   METHOD rename.
+
+    me->namespace_prefix_prefix = namespace_prefix_prefix.
 
     DATA(lo_zip) = NEW cl_abap_zip( ).
     lo_zip->load(
@@ -93,7 +102,10 @@ CLASS lcl_zip_rename_xmlns_prefixes IMPLEMENTATION.
               add_dummy_attrib_orphan_xmlns( CHANGING xml = l_content_text ).
 
               DATA(l_content_2) = VALUE string( ).
-              CALL TRANSFORMATION zxsltrename_xmlns_2 SOURCE XML l_content_text RESULT XML l_content_2.
+              CALL TRANSFORMATION zxsltrename_xmlns
+                SOURCE XML l_content_text
+                RESULT XML l_content_2
+                PARAMETERS new = namespace_prefix_prefix.
               del_dummy_attrib_orphan_xmlns( CHANGING xml = l_content_2 ).
 
               CALL TRANSFORMATION id SOURCE XML l_content_2 RESULT XML l_content.
@@ -139,7 +151,7 @@ CLASS lcl_zip_rename_xmlns_prefixes IMPLEMENTATION.
     " Excel fails if it finds /cp:coreProperties[@xx:dummy=""] with xmlns:xx="http://purl.org/dc/dcmitype/"
     " in Props/core.xml, so removing all attributes added by method add_dummy_attrib_orphan_xmlns.
     REPLACE ALL OCCURRENCES OF ` dummy=""` IN xml WITH ``.
-    REPLACE ALL OCCURRENCES OF REGEX ` new[^: <>]+:dummy=""` IN xml WITH ``.
+    REPLACE ALL OCCURRENCES OF REGEX ` ` && namespace_prefix_prefix && `[^: <>]+:dummy=""` IN xml WITH ``.
   ENDMETHOD.
 
 ENDCLASS.
@@ -205,9 +217,12 @@ CLASS lcl_app IMPLEMENTATION.
 
   METHOD start_of_selection.
     TYPES: ty_file_range TYPE RANGE OF text1024.
-    FIELD-SYMBOLS: <file_range> TYPE ty_file_range.
+    FIELD-SYMBOLS:
+      <file_range>              TYPE ty_file_range,
+      <namespace_prefix_prefix> TYPE string.
 
     ASSIGN ('S_FILTER[]') TO <file_range>.
+    ASSIGN ('P_PREFIX') TO <namespace_prefix_prefix>.
     ASSIGN ('P_INPUT') TO FIELD-SYMBOL(<folder>).
     ASSIGN ('P_OUTPUT') TO FIELD-SYMBOL(<output_folder>).
     DATA(files) = get_list_of_files( ).
@@ -216,14 +231,14 @@ CLASS lcl_app IMPLEMENTATION.
 
       DATA(old_xlsx_xstring) = gui_upload( <folder> && <file> ).
 
-      old_xlsx_xstring = NEW lcl_zip_rename_xmlns_prefixes( )->rename( old_xlsx_xstring ).
+      old_xlsx_xstring = NEW lcl_zip_rename_xmlns_prefixes( )->rename( zip_xstring = old_xlsx_xstring namespace_prefix_prefix = <namespace_prefix_prefix> ).
       gui_download( file_name = <folder> && 'fake_' && <file> file_contents = old_xlsx_xstring ).
 
       DATA(reader) = NEW zcl_excel_reader_2007( ).
       DATA(excel) = reader->zif_excel_reader~load( old_xlsx_xstring ).
       DATA(writer) = NEW zcl_excel_writer_2007( ).
       DATA(new_xlsx_xstring) = writer->zif_excel_writer~write_file( excel ).
-      new_xlsx_xstring = NEW lcl_zip_rename_xmlns_prefixes( )->rename( new_xlsx_xstring ).
+*      new_xlsx_xstring = NEW lcl_zip_rename_xmlns_prefixes( )->rename( zip_xstring = new_xlsx_xstring namespace_prefix_prefix = <namespace_prefix_prefix> ).
       gui_download( file_name = <output_folder> && <file> file_contents = new_xlsx_xstring ).
 
       DATA(cleaned_up_old_xlsx_xstring) = NEW zcl_zip_cleanup_for_diff( )->cleanup( old_xlsx_xstring ).
@@ -620,6 +635,7 @@ ENDCLASS.
 
 DATA filter TYPE text1024.
 SELECT-OPTIONS s_filter FOR filter DEFAULT '01*' SIGN I OPTION CP." LOWER CASE.
+PARAMETERS p_prefix TYPE string LOWER CASE DEFAULT 'new'.
 PARAMETERS p_input TYPE string LOWER CASE DEFAULT 'C:\Users\sandra.rossi\Documents\SAP GUI\'.
 PARAMETERS p_output TYPE string LOWER CASE DEFAULT 'C:\Users\sandra.rossi\Documents\SAP GUI\fromReader_'.
 

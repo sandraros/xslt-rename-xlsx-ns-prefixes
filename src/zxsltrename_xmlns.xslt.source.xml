@@ -2,7 +2,7 @@
 
   <xsl:strip-space elements="*"/>
 
-  <xsl:variable name="new" select="'new'"/>
+  <xsl:param name="NEW"/>
 
   <xsl:template match="/">
     <xsl:apply-templates select="*|text()|@*"/>
@@ -11,17 +11,17 @@
   <xsl:template match="*">
     <xsl:choose>
       <xsl:when test="name()!=local-name()">
-        <xsl:element name="{$new}{name()}" namespace="{namespace-uri()}">
+        <xsl:element name="{$NEW}{name()}" namespace="{namespace-uri()}">
           <xsl:apply-templates select="*|text()|@*"/>
         </xsl:element>
       </xsl:when>
-      <xsl:when test="namespace-uri()=''">
-        <xsl:element name="{$new}:{name()}" namespace="dummy">
+      <xsl:when test="contains(name(),':')">
+        <xsl:element name="{$NEW}:{name()}" namespace="{namespace-uri()}">
           <xsl:apply-templates select="*|text()|@*"/>
         </xsl:element>
       </xsl:when>
       <xsl:otherwise>
-        <xsl:element name="{$new}:{name()}" namespace="{namespace-uri()}">
+        <xsl:element name="{$NEW}:{name()}" namespace="{namespace-uri()}">
           <xsl:apply-templates select="*|text()|@*"/>
         </xsl:element>
       </xsl:otherwise>
@@ -38,32 +38,85 @@
     </xsl:variable>
     <xsl:choose>
       <xsl:when test="starts-with(name(),'xmlns:')">
-        <xsl:attribute name="xmlns:{$new}{substring-after(name(),'xmlns:')}" namespace="{namespace-uri()}">
-          <xsl:value-of select="."/>
+        <xsl:attribute name="xmlns:{$NEW}{substring-after(name(),'xmlns:')}" namespace="{namespace-uri()}">
+          <xsl:value-of select="concat($NEW,$AttributeValue)"/>
+        </xsl:attribute>
+        <xsl:attribute name="{$NEW}{substring-after(name(),'xmlns:')}:dummy2" namespace="{namespace-uri()}"/>
+      </xsl:when>
+      <xsl:when test="name()!=local-name() and starts-with(name(),'xml')">
+        <xsl:attribute name="{name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="$AttributeValue"/>
+        </xsl:attribute>
+      </xsl:when>
+      <xsl:when test="local-name()='Ignorable' and namespace-uri()='http://schemas.openxmlformats.org/markup-compatibility/2006'">
+        <xsl:variable name="NEWNamespacePrefixes">
+          <xsl:call-template name="string-replace-all">
+            <xsl:with-param name="text">
+              <xsl:value-of select="$AttributeValue"/>
+            </xsl:with-param>
+            <xsl:with-param name="replace" xml:preserve="yes">
+              <xsl:text> </xsl:text>
+            </xsl:with-param>
+            <xsl:with-param name="by">
+              <xsl:text> </xsl:text>
+              <xsl:value-of select="$NEW"/>
+            </xsl:with-param>
+          </xsl:call-template>
+        </xsl:variable>
+        <xsl:attribute name="{$NEW}{name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="concat($NEW,$NEWNamespacePrefixes)"/>
+        </xsl:attribute>
+      </xsl:when>
+      <xsl:when test="local-name()='Requires' and local-name(..)='Choice' and namespace-uri(..)='http://schemas.openxmlformats.org/markup-compatibility/2006'">
+        <xsl:attribute name="{local-name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="concat($NEW,$AttributeValue)"/>
+        </xsl:attribute>
+        <xsl:variable name="Namespace2">
+          <xsl:value-of select="namespace-uri(//*/@*[substring-before(name(),':')=$AttributeValue])"/>
+        </xsl:variable>
+        <xsl:attribute name="{$NEW}{$AttributeValue}:dummy" namespace="{$Namespace2}"/>
+      </xsl:when>
+      <xsl:when test="local-name()='type' and namespace-uri()='http://www.w3.org/2001/XMLSchema-instance'">
+        <xsl:attribute name="{$NEW}{name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="concat($NEW,$AttributeValue)"/>
         </xsl:attribute>
       </xsl:when>
       <xsl:when test="name()!=local-name()">
-        <xsl:attribute name="{$new}{name()}" namespace="{namespace-uri()}">
-          <xsl:value-of select="."/>
+        <xsl:attribute name="{$NEW}{name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="$AttributeValue"/>
         </xsl:attribute>
-        <xsl:choose>
-          <xsl:when test="local-name()='Ignorable'">
-            <xsl:variable name="Namespace">
-              <xsl:value-of select="namespace-uri(//*/@*[substring-before(name(),':')=$AttributeValue][1])"/>
-            </xsl:variable>
-            <xsl:attribute name="{$AttributeValue}:dummy" namespace="{$Namespace}"/>
-          </xsl:when>
-        </xsl:choose>
       </xsl:when>
       <xsl:when test="namespace-uri()=''">
         <xsl:attribute name="{name()}">
-          <xsl:value-of select="."/>
+          <xsl:value-of select="$AttributeValue"/>
         </xsl:attribute>
       </xsl:when>
       <xsl:otherwise>
-        <xsl:attribute name="{$new}:{name()}" namespace="{namespace-uri()}">
-          <xsl:value-of select="."/>
+        <xsl:attribute name="{$NEW}:{name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="$AttributeValue"/>
         </xsl:attribute>
+      </xsl:otherwise>
+    </xsl:choose>
+  </xsl:template>
+
+  <!-- ============= STRING-REPLACE-ALL ============= -->
+  <!-- copyright http://geekswithblogs.net/Erik/archive/2008/04/01/120915.aspx -->
+  <xsl:template name="string-replace-all">
+    <xsl:param name="text"/>
+    <xsl:param name="replace"/>
+    <xsl:param name="by"/>
+    <xsl:choose>
+      <xsl:when test="contains($text, $replace)">
+        <xsl:value-of select="substring-before($text,$replace)"/>
+        <xsl:value-of select="$by"/>
+        <xsl:call-template name="string-replace-all">
+          <xsl:with-param name="text" select="substring-after($text,$replace)"/>
+          <xsl:with-param name="replace" select="$replace"/>
+          <xsl:with-param name="by" select="$by"/>
+        </xsl:call-template>
+      </xsl:when>
+      <xsl:otherwise>
+        <xsl:value-of select="$text"/>
       </xsl:otherwise>
     </xsl:choose>
   </xsl:template>
