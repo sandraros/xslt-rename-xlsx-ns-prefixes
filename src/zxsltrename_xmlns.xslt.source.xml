@@ -157,8 +157,10 @@
   <xsl:template name="define-dummy-attributes">
     <xsl:param name="NEWNamespacePrefixes"/>
     <xsl:choose>
-      <xsl:when test="contains(NEWNamespacePrefixes, ' ')">
-        <xsl:call-template name="string-replace-all">
+      <xsl:when test="contains($NEWNamespacePrefixes,' ')">
+        <xsl:variable name="nsprefix" select="substring-before($NEWNamespacePrefixes,' ')"/>
+        <xsl:attribute name="{concat($nsprefix,':dummy')}" namespace="{../namespace::*[name()=substring-after($nsprefix,$NEW)]}"/>
+        <xsl:call-template name="define-dummy-attributes">
           <xsl:with-param name="NEWNamespacePrefixes" select="substring-after($NEWNamespacePrefixes,' ')"/>
         </xsl:call-template>
       </xsl:when>

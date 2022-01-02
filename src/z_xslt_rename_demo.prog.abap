@@ -291,9 +291,12 @@ CLASS lcl_app IMPLEMENTATION.
   METHOD start_of_selection.
     DATA: new_xlsx_xstring TYPE xstring.
     FIELD-SYMBOLS:
-      <file_range>              TYPE ty_file_range,
-      <namespace_prefix_prefix> TYPE string.
+      <file_range>                  TYPE ty_file_range,
+      <namespace_prefix_prefix>     TYPE string,
+      <use_xlsx_special_attributes> TYPE abap_bool.
 
+    ASSIGN ('P_XLSX') TO <use_xlsx_special_attributes>.
+    ASSERT sy-subrc = 0.
     ASSIGN ('S_FILES[]') TO <file_range>.
     ASSERT sy-subrc = 0.
     ASSIGN ('P_PREFIX') TO <namespace_prefix_prefix>.
@@ -311,12 +314,13 @@ CLASS lcl_app IMPLEMENTATION.
                             )->rename( zip_xstring             = file_xstring
                                        namespace_prefix_prefix = <namespace_prefix_prefix>
                                        special_attributes      = xlsx_special_attributes ).
-        gui_download( file_name = <output_folder> && <file>-low file_contents = new_xlsx_xstring ).
       ELSEIF <file>-low CP '*.xml'.
         new_xlsx_xstring = NEW lcl_xml_rename_xmlns_prefixes(
                             )->rename( xml_xstring             = file_xstring
-                                       namespace_prefix_prefix = <namespace_prefix_prefix> ).
+                                       namespace_prefix_prefix = <namespace_prefix_prefix>
+                                       special_attributes      = COND #( WHEN <use_xlsx_special_attributes> = abap_true THEN xlsx_special_attributes ) ).
       ENDIF.
+      gui_download( file_name = <output_folder> && <file>-low file_contents = new_xlsx_xstring ).
 
     ENDLOOP.
 
@@ -766,6 +770,7 @@ SELECTION-SCREEN PUSHBUTTON /1(50) a2x_text USER-COMMAND a2x.
 PARAMETERS p_prefix TYPE string LOWER CASE DEFAULT 'new'.
 PARAMETERS p_input TYPE string LOWER CASE DEFAULT 'C:\Users\sandra.rossi\Documents\SAP GUI\'.
 PARAMETERS p_output TYPE string LOWER CASE DEFAULT 'C:\Users\sandra.rossi\Documents\SAP GUI\fromReader_'.
+PARAMETERS p_xlsx AS CHECKBOX DEFAULT 'X'.
 
 LOAD-OF-PROGRAM.
   a2x_text = 'Initialize list of abap2xlsx demo files'(001).
