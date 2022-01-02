@@ -1,0 +1,171 @@
+<xsl:transform xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:sap="http://www.sap.com/sapxsl" version="1.0">
+
+  <xsl:strip-space elements="*"/>
+
+  <xsl:param name="NEW"/>
+  <xsl:param name="ATTRIBUTES"/>
+
+  <xsl:template match="/">
+    <xsl:apply-templates select="*|text()|@*"/>
+  </xsl:template>
+
+  <xsl:template match="*">
+    <xsl:choose>
+      <xsl:when test="name()!=local-name()">
+        <xsl:element name="{$NEW}{name()}" namespace="{namespace-uri()}">
+          <xsl:apply-templates select="*|text()|@*"/>
+        </xsl:element>
+      </xsl:when>
+      <xsl:when test="contains(name(),':')">
+        <xsl:element name="{$NEW}:{name()}" namespace="{namespace-uri()}">
+          <xsl:apply-templates select="*|text()|@*"/>
+        </xsl:element>
+      </xsl:when>
+      <xsl:otherwise>
+        <xsl:element name="{$NEW}:{name()}" namespace="{namespace-uri()}">
+          <xsl:apply-templates select="*|text()|@*"/>
+        </xsl:element>
+      </xsl:otherwise>
+    </xsl:choose>
+  </xsl:template>
+
+  <xsl:template match="text()">
+    <xsl:value-of select="."/>
+  </xsl:template>
+
+  <xsl:template match="@*">
+    <xsl:variable name="AttributeValue">
+      <xsl:value-of select="string(.)"/>
+    </xsl:variable>
+    <xsl:variable name="DoesAttributeValueContainNamespacePrefixes">
+      <xsl:call-template name="DoesAttributeValueContainNamespacePrefixes">
+        <xsl:with-param name="attribute" select="."/>
+      </xsl:call-template>
+    </xsl:variable>
+    <xsl:variable name="DoesAttributeValueContainQName">
+      <xsl:call-template name="DoesAttributeValueContainQName">
+        <xsl:with-param name="attribute" select="."/>
+      </xsl:call-template>
+    </xsl:variable>
+    <xsl:choose>
+      <xsl:when test="starts-with(name(),'xmlns:')">
+        <xsl:attribute name="{$NEW}{substring-after(name(),'xmlns:')}:dummy2" namespace="{namespace-uri()}"/>
+      </xsl:when>
+      <xsl:when test="name()!=local-name() and starts-with(name(),'xml')">
+        <xsl:attribute name="{name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="$AttributeValue"/>
+        </xsl:attribute>
+      </xsl:when>
+      <xsl:when test="$DoesAttributeValueContainNamespacePrefixes!=''">
+        <xsl:variable name="NEWNamespacePrefixes">
+          <xsl:call-template name="string-replace-all">
+            <xsl:with-param name="text">
+              <xsl:value-of select="$AttributeValue"/>
+            </xsl:with-param>
+            <xsl:with-param name="replace" xml:preserve="yes">
+              <xsl:text> </xsl:text>
+            </xsl:with-param>
+            <xsl:with-param name="by">
+              <xsl:text> </xsl:text>
+              <xsl:value-of select="$NEW"/>
+            </xsl:with-param>
+          </xsl:call-template>
+        </xsl:variable>
+        <xsl:variable name="NewAttributeName">
+          <xsl:choose>
+            <xsl:when test="contains(name(),':')">
+              <xsl:value-of select="concat($NEW,name())"/>
+            </xsl:when>
+            <xsl:otherwise>
+              <xsl:value-of select="name()"/>
+            </xsl:otherwise>
+          </xsl:choose>
+        </xsl:variable>
+        <xsl:attribute name="{$NewAttributeName}" namespace="{namespace-uri()}">
+          <xsl:value-of select="concat($NEW,$NEWNamespacePrefixes)"/>
+        </xsl:attribute>
+        <xsl:call-template name="define-dummy-attributes">
+          <xsl:with-param name="NEWNamespacePrefixes">
+            <xsl:value-of select="concat($NEW,$NEWNamespacePrefixes)"/>
+          </xsl:with-param>
+        </xsl:call-template>
+      </xsl:when>
+      <xsl:when test="$DoesAttributeValueContainQName!=''">
+        <xsl:attribute name="{$NEW}{name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="concat($NEW,$AttributeValue)"/>
+        </xsl:attribute>
+      </xsl:when>
+      <xsl:when test="name()!=local-name()">
+        <xsl:attribute name="{$NEW}{name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="$AttributeValue"/>
+        </xsl:attribute>
+      </xsl:when>
+      <xsl:when test="namespace-uri()=''">
+        <xsl:attribute name="{name()}">
+          <xsl:value-of select="$AttributeValue"/>
+        </xsl:attribute>
+      </xsl:when>
+      <xsl:otherwise>
+        <xsl:attribute name="{$NEW}:{name()}" namespace="{namespace-uri()}">
+          <xsl:value-of select="$AttributeValue"/>
+        </xsl:attribute>
+      </xsl:otherwise>
+    </xsl:choose>
+  </xsl:template>
+
+  <!-- =============  ============= -->
+  <xsl:template name="DoesAttributeValueContainNamespacePrefixes">
+    <xsl:param name="attribute"/>
+    <xsl:for-each select="$ATTRIBUTES[@valueContainingNamespacePrefixes='1' and local-name($attribute)=@localName and namespace-uri($attribute)=@localNamespaceUri
+                            and (string(@parentLocalName)='' or (local-name($attribute/..)=@parentLocalName and namespace-uri($attribute/..)=@parentNamespaceUri))]">
+      X
+    </xsl:for-each>
+  </xsl:template>
+
+  <!-- =============  ============= -->
+  <xsl:template name="DoesAttributeValueContainQName">
+    <xsl:param name="attribute"/>
+    <xsl:for-each select="$ATTRIBUTES[@valueContainingQName='1' and local-name($attribute)=@localName and namespace-uri($attribute)=@localNamespaceUri
+                            and (string(@parentLocalName)='' or (local-name($attribute/..)=@parentLocalName and namespace-uri($attribute/..)=@parentNamespaceUri))]">
+      X
+    </xsl:for-each>
+  </xsl:template>
+
+  <!-- ============= STRING-REPLACE-ALL ============= -->
+  <!-- copyright http://geekswithblogs.net/Erik/archive/2008/04/01/120915.aspx -->
+  <xsl:template name="string-replace-all">
+    <xsl:param name="text"/>
+    <xsl:param name="replace"/>
+    <xsl:param name="by"/>
+    <xsl:choose>
+      <xsl:when test="contains($text, $replace)">
+        <xsl:value-of select="substring-before($text,$replace)"/>
+        <xsl:value-of select="$by"/>
+        <xsl:call-template name="string-replace-all">
+          <xsl:with-param name="text" select="substring-after($text,$replace)"/>
+          <xsl:with-param name="replace" select="$replace"/>
+          <xsl:with-param name="by" select="$by"/>
+        </xsl:call-template>
+      </xsl:when>
+      <xsl:otherwise>
+        <xsl:value-of select="$text"/>
+      </xsl:otherwise>
+    </xsl:choose>
+  </xsl:template>
+
+  <!-- ============= DEFINE-DUMMY-ATTRIBUTES ============= -->
+  <xsl:template name="define-dummy-attributes">
+    <xsl:param name="NEWNamespacePrefixes"/>
+    <xsl:choose>
+      <xsl:when test="contains(NEWNamespacePrefixes, ' ')">
+        <xsl:call-template name="string-replace-all">
+          <xsl:with-param name="NEWNamespacePrefixes" select="substring-after($NEWNamespacePrefixes,' ')"/>
+        </xsl:call-template>
+      </xsl:when>
+      <xsl:otherwise>
+        <xsl:attribute name="{concat($NEWNamespacePrefixes,':dummy')}" namespace="{../namespace::*[name()=substring-after($NEWNamespacePrefixes,$NEW)]}"/>
+      </xsl:otherwise>
+    </xsl:choose>
+  </xsl:template>
+
+</xsl:transform>
