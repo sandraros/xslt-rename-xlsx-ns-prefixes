@@ -68,10 +68,6 @@ CLASS lcl_xml_rename_xmlns_prefixes DEFINITION.
 
   PRIVATE SECTION.
 
-    METHODS add_dummy_attrib_orphan_xmlns
-      CHANGING
-        xml TYPE string.
-
     METHODS del_dummy_attrib_orphan_xmlns
       CHANGING
         xml TYPE string.
@@ -184,7 +180,6 @@ CLASS lcl_xml_rename_xmlns_prefixes IMPLEMENTATION.
 
         " no exception -> it's XML
         TRY.
-*            add_dummy_attrib_orphan_xmlns( CHANGING xml = l_content_text ).
 
             DATA(l_content_2) = VALUE string( ).
             CALL TRANSFORMATION zxsltrename_xmlns
@@ -206,28 +201,18 @@ CLASS lcl_xml_rename_xmlns_prefixes IMPLEMENTATION.
         IF error1->textid <> error1->bad_source_context.
           RAISE EXCEPTION error1.
         ENDIF.
+        result = xml_xstring.
     ENDTRY.
 
   ENDMETHOD.
 
 
-  METHOD add_dummy_attrib_orphan_xmlns.
+  METHOD del_dummy_attrib_orphan_xmlns.
     " Excel needs xmlns:xr3="..." with mc:Ignorable="xr3 xr4" in Excel sheet#.xml, XSLT/XPath cannot
     "   read xmlns:xxxx if there's no element/attribute referencing the xxxx prefix, so adding dummy
-    "   attributes here. All prefixes of Ignorable must be known at that node (or parent node, probably).
-    FIND ALL OCCURRENCES OF REGEX '[^a-zA-Z]xmlns:([^=]+)="[^"]+"' IN xml RESULTS DATA(matches).
-    SORT matches BY offset DESCENDING.
-    LOOP AT matches ASSIGNING FIELD-SYMBOL(<match>).
-      DATA(namespace_prefix) = CONV string( LET <submatch> = <match>-submatches[ 1 ] IN xml+<submatch>-offset(<submatch>-length) ).
-      DATA(offset) = <match>-offset + <match>-length.
-      REPLACE SECTION OFFSET offset LENGTH 0 OF xml WITH | { namespace_prefix }:dummy=""|.
-    ENDLOOP.
-  ENDMETHOD.
-
-
-  METHOD del_dummy_attrib_orphan_xmlns.
+    "   attributes by transformation. All prefixes of Ignorable must be known at that node or parent node.
     " Excel fails if it finds /cp:coreProperties[@xx:dummy=""] with xmlns:xx="http://purl.org/dc/dcmitype/"
-    " in Props/core.xml, so removing all attributes added by method add_dummy_attrib_orphan_xmlns.
+    "   in Props/core.xml, so removing all "dummy" attributes added by transformation.
     REPLACE ALL OCCURRENCES OF ` dummy=""` IN xml WITH ``.
     REPLACE ALL OCCURRENCES OF REGEX ` ` && namespace_prefix_prefix && `[^: <>]+:dummy=""` IN xml WITH ``.
   ENDMETHOD.
@@ -444,7 +429,6 @@ CLASS lcl_app IMPLEMENTATION.
     "           xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main"
     "           xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"/>
     && |  <attribute localName="Ignorable" localNamespaceUri="http://schemas.openxmlformats.org/markup-compatibility/2006"|
-*    &&      | parentLocalName="Workbook" parentNamespaceUri="http://schemas.openxmlformats.org/spreadsheetml/2006/main"|
     &&      | valueContainingNamespacePrefixes="1"/>|
     " xl/workbook.xml:
     "====================

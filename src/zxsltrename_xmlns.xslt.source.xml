@@ -49,9 +49,6 @@
     </xsl:variable>
     <xsl:choose>
       <xsl:when test="starts-with(name(),'xmlns:')">
-        <xsl:attribute name="xmlns:{$NEW}{substring-after(name(),'xmlns:')}" namespace="{namespace-uri()}">
-          <xsl:value-of select="concat($NEW,$AttributeValue)"/>
-        </xsl:attribute>
         <xsl:attribute name="{$NEW}{substring-after(name(),'xmlns:')}:dummy2" namespace="{namespace-uri()}"/>
       </xsl:when>
       <xsl:when test="name()!=local-name() and starts-with(name(),'xml')">
@@ -74,7 +71,17 @@
             </xsl:with-param>
           </xsl:call-template>
         </xsl:variable>
-        <xsl:attribute name="{$NEW}{name()}" namespace="{namespace-uri()}">
+        <xsl:variable name="NewAttributeName">
+          <xsl:choose>
+            <xsl:when test="contains(name(),':')">
+              <xsl:value-of select="concat($NEW,name())"/>
+            </xsl:when>
+            <xsl:otherwise>
+              <xsl:value-of select="name()"/>
+            </xsl:otherwise>
+          </xsl:choose>
+        </xsl:variable>
+        <xsl:attribute name="{$NewAttributeName}" namespace="{namespace-uri()}">
           <xsl:value-of select="concat($NEW,$NEWNamespacePrefixes)"/>
         </xsl:attribute>
         <xsl:call-template name="define-dummy-attributes">
@@ -83,16 +90,6 @@
           </xsl:with-param>
         </xsl:call-template>
       </xsl:when>
-      <!--<xsl:when test="local-name()='Requires' and local-name(..)='Choice' and namespace-uri(..)='http://schemas.openxmlformats.org/markup-compatibility/2006'">
-        <xsl:attribute name="{local-name()}" namespace="{namespace-uri()}">
-          <xsl:value-of select="concat($NEW,$AttributeValue)"/>
-        </xsl:attribute>
-        <xsl:variable name="Namespace2">
-          <xsl:value-of select="namespace-uri(//*/@*[substring-before(name(),':')=$AttributeValue])"/>
-        </xsl:variable>
-        <xsl:attribute name="{$NEW}{$AttributeValue}:dummy" namespace="{$Namespace2}"/>
-      </xsl:when>-->
-      <!--<xsl:when test="local-name()='type' and namespace-uri()='http://www.w3.org/2001/XMLSchema-instance'">-->
       <xsl:when test="$DoesAttributeValueContainQName!=''">
         <xsl:attribute name="{$NEW}{name()}" namespace="{namespace-uri()}">
           <xsl:value-of select="concat($NEW,$AttributeValue)"/>
@@ -167,7 +164,6 @@
       </xsl:when>
       <xsl:otherwise>
         <xsl:attribute name="{concat($NEWNamespacePrefixes,':dummy')}" namespace="{../namespace::*[name()=substring-after($NEWNamespacePrefixes,$NEW)]}"/>
-        <!--<xsl:attribute name="concat($NEWNamespacePrefixes,':dummy'" namespace="http://aaaaa"/>-->
       </xsl:otherwise>
     </xsl:choose>
   </xsl:template>
