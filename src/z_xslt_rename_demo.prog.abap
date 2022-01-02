@@ -9,6 +9,12 @@ CLASS lcl_app DEFINITION FINAL.
 
   PUBLIC SECTION.
 
+    METHODS at_selection_screen.
+
+    METHODS set_ref_sscrfields
+      IMPORTING
+        ref_sscrfields TYPE REF TO sscrfields.
+
     METHODS start_of_selection
       RAISING
         zcx_excel
@@ -16,7 +22,9 @@ CLASS lcl_app DEFINITION FINAL.
 
   PRIVATE SECTION.
 
-    METHODS get_list_of_files
+    TYPES: ty_file_range TYPE RANGE OF text1024.
+
+    METHODS get_abap2xlsx_demo_files
       RETURNING
         VALUE(result) TYPE string_table.
 
@@ -35,16 +43,24 @@ CLASS lcl_app DEFINITION FINAL.
       RAISING
         zcx_excel.
 
+    METHODS get_xlsx_special_attributes
+      RETURNING
+        VALUE(result) TYPE REF TO if_ixml_node_collection.
+
+    DATA: ref_sscrfields TYPE REF TO sscrfields.
+
 ENDCLASS.
 
-CLASS lcl_zip_rename_xmlns_prefixes DEFINITION.
+
+CLASS lcl_xml_rename_xmlns_prefixes DEFINITION.
 
   PUBLIC SECTION.
 
     METHODS rename
       IMPORTING
-        zip_xstring             TYPE xstring
+        xml_xstring             TYPE xstring
         namespace_prefix_prefix TYPE string
+        special_attributes      TYPE REF TO if_ixml_node_collection OPTIONAL
       RETURNING
         VALUE(result)           TYPE xstring
       RAISING
@@ -55,6 +71,7 @@ CLASS lcl_zip_rename_xmlns_prefixes DEFINITION.
     METHODS add_dummy_attrib_orphan_xmlns
       CHANGING
         xml TYPE string.
+
     METHODS del_dummy_attrib_orphan_xmlns
       CHANGING
         xml TYPE string.
@@ -63,98 +80,23 @@ CLASS lcl_zip_rename_xmlns_prefixes DEFINITION.
 
 ENDCLASS.
 
-CLASS lcl_zip_rename_xmlns_prefixes IMPLEMENTATION.
 
-  METHOD rename.
+CLASS lcl_zip_rename_xmlns_prefixes DEFINITION.
 
-    me->namespace_prefix_prefix = namespace_prefix_prefix.
+  PUBLIC SECTION.
 
-    DATA(lo_zip) = NEW cl_abap_zip( ).
-    lo_zip->load(
-      EXPORTING
-        zip             = zip_xstring
-      EXCEPTIONS
-        zip_parse_error = 1
-        OTHERS          = 2 ).
-
-    DATA(result_zip) = NEW cl_abap_zip( ).
-
-    LOOP AT lo_zip->files ASSIGNING FIELD-SYMBOL(<ls_zip_file>).
-
-      lo_zip->get(
-        EXPORTING
-          name                    = <ls_zip_file>-name
-        IMPORTING
-          content                 = DATA(l_content)
-        EXCEPTIONS
-          zip_index_error         = 1
-          zip_decompression_error = 2
-          OTHERS                  = 3 ).
-
-      TRY.
-
-          " dummy parsing just to check whether it's XML
-          DATA(l_content_text) = VALUE string( ).
-          CALL TRANSFORMATION id SOURCE XML l_content RESULT XML l_content_text.
-
-          " no exception -> it's XML
-          TRY.
-              add_dummy_attrib_orphan_xmlns( CHANGING xml = l_content_text ).
-
-              DATA(l_content_2) = VALUE string( ).
-              CALL TRANSFORMATION zxsltrename_xmlns
-                SOURCE XML l_content_text
-                RESULT XML l_content_2
-                PARAMETERS new = namespace_prefix_prefix.
-              del_dummy_attrib_orphan_xmlns( CHANGING xml = l_content_2 ).
-
-              CALL TRANSFORMATION id SOURCE XML l_content_2 RESULT XML l_content.
-
-            CATCH cx_root INTO DATA(error2).
-              RAISE EXCEPTION error2.
-          ENDTRY.
-
-        CATCH cx_xslt_runtime_error INTO DATA(error1).
-          " exception -> it's not XML (image, etc.), just continue (except if it's invalid XML)
-          IF error1->textid <> error1->bad_source_context.
-            RAISE EXCEPTION error1.
-          ENDIF.
-      ENDTRY.
-
-      result_zip->add(
-        EXPORTING
-          name           = <ls_zip_file>-name
-          content        = l_content ).
-
-    ENDLOOP.
-
-    result = result_zip->save( ).
-
-  ENDMETHOD.
-
-
-  METHOD add_dummy_attrib_orphan_xmlns.
-    " Excel needs xmlns:xr3="..." with mc:Ignorable="xr3 xr4" in Excel sheet#.xml, XSLT/XPath cannot
-    "   read xmlns:xxxx if there's no element/attribute referencing the xxxx prefix, so adding dummy
-    "   attributes here. All prefixes of Ignorable must be known at that node (or parent node, probably).
-    FIND ALL OCCURRENCES OF REGEX '[^a-zA-Z]xmlns:([^=]+)="[^"]+"' IN xml RESULTS DATA(matches).
-    SORT matches BY offset DESCENDING.
-    LOOP AT matches ASSIGNING FIELD-SYMBOL(<match>).
-      DATA(namespace_prefix) = CONV string( LET <submatch> = <match>-submatches[ 1 ] IN xml+<submatch>-offset(<submatch>-length) ).
-      DATA(offset) = <match>-offset + <match>-length.
-      REPLACE SECTION OFFSET offset LENGTH 0 OF xml WITH | { namespace_prefix }:dummy=""|.
-    ENDLOOP.
-  ENDMETHOD.
-
-
-  METHOD del_dummy_attrib_orphan_xmlns.
-    " Excel fails if it finds /cp:coreProperties[@xx:dummy=""] with xmlns:xx="http://purl.org/dc/dcmitype/"
-    " in Props/core.xml, so removing all attributes added by method add_dummy_attrib_orphan_xmlns.
-    REPLACE ALL OCCURRENCES OF ` dummy=""` IN xml WITH ``.
-    REPLACE ALL OCCURRENCES OF REGEX ` ` && namespace_prefix_prefix && `[^: <>]+:dummy=""` IN xml WITH ``.
-  ENDMETHOD.
+    METHODS rename
+      IMPORTING
+        zip_xstring             TYPE xstring
+        namespace_prefix_prefix TYPE string
+        special_attributes      TYPE REF TO if_ixml_node_collection OPTIONAL
+      RETURNING
+        VALUE(result)           TYPE xstring
+      RAISING
+        cx_static_check.
 
 ENDCLASS.
+
 
 CLASS zcl_zip_cleanup_for_diff DEFINITION
   CREATE PUBLIC .
@@ -213,41 +155,182 @@ ENDCLASS.
 
 
 
+CLASS lcl_xml_rename_xmlns_prefixes IMPLEMENTATION.
+
+  METHOD rename.
+
+    IF special_attributes IS BOUND.
+      DATA(local_special_attributes) = special_attributes.
+    ELSE.
+      DATA(xml_string) = cl_abap_codepage=>convert_to( |<attributes/>| ).
+      DATA xml_doc TYPE REF TO if_ixml_document.
+      CALL FUNCTION 'SDIXML_XML_TO_DOM'
+        EXPORTING
+          xml           = xml_string
+        IMPORTING
+          document      = xml_doc
+        EXCEPTIONS
+          invalid_input = 1
+          OTHERS        = 2.
+      local_special_attributes = xml_doc->get_elements_by_tag_name( 'attribute' ).
+    ENDIF.
+
+    TRY.
+
+
+        " dummy parsing just to check whether it's XML or not
+        DATA(l_content_text) = VALUE string( ).
+        CALL TRANSFORMATION id SOURCE XML xml_xstring RESULT XML l_content_text.
+
+        " no exception -> it's XML
+        TRY.
+*            add_dummy_attrib_orphan_xmlns( CHANGING xml = l_content_text ).
+
+            DATA(l_content_2) = VALUE string( ).
+            CALL TRANSFORMATION zxsltrename_xmlns
+              SOURCE XML l_content_text
+              RESULT XML l_content_2
+              PARAMETERS new        = namespace_prefix_prefix
+                         attributes = local_special_attributes.
+
+            del_dummy_attrib_orphan_xmlns( CHANGING xml = l_content_2 ).
+
+            CALL TRANSFORMATION id SOURCE XML l_content_2 RESULT XML result.
+
+          CATCH cx_root INTO DATA(error2).
+            RAISE EXCEPTION error2.
+        ENDTRY.
+
+      CATCH cx_xslt_runtime_error INTO DATA(error1).
+        " exception -> it's not XML (image, etc.), just continue (except if it's invalid XML)
+        IF error1->textid <> error1->bad_source_context.
+          RAISE EXCEPTION error1.
+        ENDIF.
+    ENDTRY.
+
+  ENDMETHOD.
+
+
+  METHOD add_dummy_attrib_orphan_xmlns.
+    " Excel needs xmlns:xr3="..." with mc:Ignorable="xr3 xr4" in Excel sheet#.xml, XSLT/XPath cannot
+    "   read xmlns:xxxx if there's no element/attribute referencing the xxxx prefix, so adding dummy
+    "   attributes here. All prefixes of Ignorable must be known at that node (or parent node, probably).
+    FIND ALL OCCURRENCES OF REGEX '[^a-zA-Z]xmlns:([^=]+)="[^"]+"' IN xml RESULTS DATA(matches).
+    SORT matches BY offset DESCENDING.
+    LOOP AT matches ASSIGNING FIELD-SYMBOL(<match>).
+      DATA(namespace_prefix) = CONV string( LET <submatch> = <match>-submatches[ 1 ] IN xml+<submatch>-offset(<submatch>-length) ).
+      DATA(offset) = <match>-offset + <match>-length.
+      REPLACE SECTION OFFSET offset LENGTH 0 OF xml WITH | { namespace_prefix }:dummy=""|.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD del_dummy_attrib_orphan_xmlns.
+    " Excel fails if it finds /cp:coreProperties[@xx:dummy=""] with xmlns:xx="http://purl.org/dc/dcmitype/"
+    " in Props/core.xml, so removing all attributes added by method add_dummy_attrib_orphan_xmlns.
+    REPLACE ALL OCCURRENCES OF ` dummy=""` IN xml WITH ``.
+    REPLACE ALL OCCURRENCES OF REGEX ` ` && namespace_prefix_prefix && `[^: <>]+:dummy=""` IN xml WITH ``.
+  ENDMETHOD.
+
+
+ENDCLASS.
+
+
+CLASS lcl_zip_rename_xmlns_prefixes IMPLEMENTATION.
+
+  METHOD rename.
+
+    DATA(lo_zip) = NEW cl_abap_zip( ).
+    lo_zip->load(
+      EXPORTING
+        zip             = zip_xstring
+      EXCEPTIONS
+        zip_parse_error = 1
+        OTHERS          = 2 ).
+
+    DATA(result_zip) = NEW cl_abap_zip( ).
+
+    LOOP AT lo_zip->files ASSIGNING FIELD-SYMBOL(<ls_zip_file>).
+
+      lo_zip->get(
+        EXPORTING
+          name                    = <ls_zip_file>-name
+        IMPORTING
+          content                 = DATA(l_content)
+        EXCEPTIONS
+          zip_index_error         = 1
+          zip_decompression_error = 2
+          OTHERS                  = 3 ).
+
+      l_content = NEW lcl_xml_rename_xmlns_prefixes( )->rename( xml_xstring = l_content namespace_prefix_prefix = namespace_prefix_prefix special_attributes = special_attributes ).
+
+      result_zip->add(
+        EXPORTING
+          name           = <ls_zip_file>-name
+          content        = l_content ).
+
+    ENDLOOP.
+
+    result = result_zip->save( ).
+
+  ENDMETHOD.
+
+
+ENDCLASS.
+
+
 CLASS lcl_app IMPLEMENTATION.
 
+  METHOD at_selection_screen.
+
+    FIELD-SYMBOLS:
+      <file_range> TYPE ty_file_range.
+
+    CASE ref_sscrfields->ucomm.
+      WHEN 'A2X'.
+        ASSIGN ('S_FILES[]') TO <file_range>.
+        ASSERT sy-subrc = 0.
+        DATA(files) = get_abap2xlsx_demo_files( ).
+        LOOP AT files ASSIGNING FIELD-SYMBOL(<file>).
+          IF NOT line_exists( <file_range>[ low = <file> ] ).
+            APPEND INITIAL LINE TO <file_range> ASSIGNING FIELD-SYMBOL(<file_range_line>).
+            <file_range_line> = VALUE #( sign = 'I' option = 'EQ' low = <file> ).
+          ENDIF.
+        ENDLOOP.
+
+    ENDCASE.
+
+  ENDMETHOD.
+
+
   METHOD start_of_selection.
-    TYPES: ty_file_range TYPE RANGE OF text1024.
+    DATA: new_xlsx_xstring TYPE xstring.
     FIELD-SYMBOLS:
       <file_range>              TYPE ty_file_range,
       <namespace_prefix_prefix> TYPE string.
 
-    ASSIGN ('S_FILTER[]') TO <file_range>.
+    ASSIGN ('S_FILES[]') TO <file_range>.
+    ASSERT sy-subrc = 0.
     ASSIGN ('P_PREFIX') TO <namespace_prefix_prefix>.
+    ASSERT sy-subrc = 0.
     ASSIGN ('P_INPUT') TO FIELD-SYMBOL(<folder>).
+    ASSERT sy-subrc = 0.
     ASSIGN ('P_OUTPUT') TO FIELD-SYMBOL(<output_folder>).
-    DATA(files) = get_list_of_files( ).
-    LOOP AT files ASSIGNING FIELD-SYMBOL(<file>)
-        WHERE table_line IN <file_range>.
-
-      DATA(old_xlsx_xstring) = gui_upload( <folder> && <file> ).
-
-      old_xlsx_xstring = NEW lcl_zip_rename_xmlns_prefixes( )->rename( zip_xstring = old_xlsx_xstring namespace_prefix_prefix = <namespace_prefix_prefix> ).
-      gui_download( file_name = <folder> && 'fake_' && <file> file_contents = old_xlsx_xstring ).
-
-      DATA(reader) = NEW zcl_excel_reader_2007( ).
-      DATA(excel) = reader->zif_excel_reader~load( old_xlsx_xstring ).
-      DATA(writer) = NEW zcl_excel_writer_2007( ).
-      DATA(new_xlsx_xstring) = writer->zif_excel_writer~write_file( excel ).
-*      new_xlsx_xstring = NEW lcl_zip_rename_xmlns_prefixes( )->rename( zip_xstring = new_xlsx_xstring namespace_prefix_prefix = <namespace_prefix_prefix> ).
-      gui_download( file_name = <output_folder> && <file> file_contents = new_xlsx_xstring ).
-
-      DATA(cleaned_up_old_xlsx_xstring) = NEW zcl_zip_cleanup_for_diff( )->cleanup( old_xlsx_xstring ).
-      DATA(cleaned_up_new_xlsx_xstring) = NEW zcl_zip_cleanup_for_diff( )->cleanup( new_xlsx_xstring ).
-      WRITE : / <file>.
-      IF cleaned_up_new_xlsx_xstring = cleaned_up_old_xlsx_xstring.
-        WRITE 'OK' COLOR COL_POSITIVE.
-      ELSE.
-        WRITE 'KO' COLOR COL_NEGATIVE.
+    ASSERT sy-subrc = 0.
+    DATA(files) = get_abap2xlsx_demo_files( ).
+    DATA(xlsx_special_attributes) = get_xlsx_special_attributes( ).
+    LOOP AT <file_range> ASSIGNING FIELD-SYMBOL(<file>).
+      DATA(file_xstring) = gui_upload( <folder> && <file>-low ).
+      IF <file>-low CP '*.xlsx'.
+        new_xlsx_xstring = NEW lcl_zip_rename_xmlns_prefixes(
+                            )->rename( zip_xstring             = file_xstring
+                                       namespace_prefix_prefix = <namespace_prefix_prefix>
+                                       special_attributes      = xlsx_special_attributes ).
+        gui_download( file_name = <output_folder> && <file>-low file_contents = new_xlsx_xstring ).
+      ELSEIF <file>-low CP '*.xml'.
+        new_xlsx_xstring = NEW lcl_xml_rename_xmlns_prefixes(
+                            )->rename( xml_xstring             = file_xstring
+                                       namespace_prefix_prefix = <namespace_prefix_prefix> ).
       ENDIF.
 
     ENDLOOP.
@@ -294,7 +377,7 @@ CLASS lcl_app IMPLEMENTATION.
   ENDMETHOD.
 
 
-  METHOD get_list_of_files.
+  METHOD get_abap2xlsx_demo_files.
 
     APPEND '01_HelloWorld.xlsx' TO result.
     APPEND '02_Styles.xlsx' TO result.
@@ -345,6 +428,58 @@ CLASS lcl_app IMPLEMENTATION.
   ENDMETHOD.
 
 
+  METHOD get_xlsx_special_attributes.
+
+    DATA(xml_string) = cl_abap_codepage=>convert_to(
+       |<attributes>|
+    " xl/workbook.xml:
+    "====================
+    "   <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    "           mc:Ignorable="x14ac"
+    "           xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    "           xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main"
+    "   <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    "           mc:Ignorable="x15 xr"
+    "           xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    "           xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main"
+    "           xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision"/>
+    && |  <attribute localName="Ignorable" localNamespaceUri="http://schemas.openxmlformats.org/markup-compatibility/2006"|
+*    &&      | parentLocalName="Workbook" parentNamespaceUri="http://schemas.openxmlformats.org/spreadsheetml/2006/main"|
+    &&      | valueContainingNamespacePrefixes="1"/>|
+    " xl/workbook.xml:
+    "====================
+    "       <mc:Choice Requires="x15"
+    "           xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    "           xmlns:x15="http://schemas.microsoft.com/office/spreadsheetml/2010/11/main"/>
+    && |  <attribute localName="Requires" localNamespaceUri=""|
+    &&      | parentLocalName="Choice" parentNamespaceUri="http://schemas.openxmlformats.org/markup-compatibility/2006"|
+    &&      | valueContainingNamespacePrefixes="1"/>|
+    " docProps/core.xml:
+    "====================
+    "   <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+    "       xmlns:dcterms="http://purl.org/dc/terms/"
+    "       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    "     <dcterms:created xsi:type="dcterms:W3CDTF">2018-07-10T12:34:31Z</dcterms:created>
+    "     <dcterms:modified xsi:type="dcterms:W3CDTF">2021-12-26T16:56:41Z</dcterms:modified>
+    && |  <attribute localName="type" localNamespaceUri="http://www.w3.org/2001/XMLSchema-instance"|
+    &&      | valueContainingQName="1"/>|
+    && |</attributes>| ).
+
+    DATA xml_doc TYPE REF TO if_ixml_document.
+    CALL FUNCTION 'SDIXML_XML_TO_DOM'
+      EXPORTING
+        xml           = xml_string
+      IMPORTING
+        document      = xml_doc
+      EXCEPTIONS
+        invalid_input = 1
+        OTHERS        = 2.
+
+    result = xml_doc->get_elements_by_tag_name( 'attribute' ).
+
+  ENDMETHOD.
+
+
   METHOD gui_download.
 
     DATA(bin_filesize) = xstrlen( file_contents ).
@@ -386,6 +521,13 @@ CLASS lcl_app IMPLEMENTATION.
     IF sy-subrc <> 0.
       RAISE EXCEPTION TYPE zcx_excel EXPORTING error = |gui_download error { file_name }|.
     ENDIF.
+
+  ENDMETHOD.
+
+
+  METHOD set_ref_sscrfields.
+
+    me->ref_sscrfields = ref_sscrfields.
 
   ENDMETHOD.
 
@@ -633,11 +775,26 @@ CLASS zcl_zip_cleanup_for_diff IMPLEMENTATION.
 
 ENDCLASS.
 
-DATA filter TYPE text1024.
-SELECT-OPTIONS s_filter FOR filter DEFAULT '01*' SIGN I OPTION CP." LOWER CASE.
+TABLES sscrfields.
+DATA file TYPE text1024.
+SELECT-OPTIONS s_files FOR file DEFAULT '01_HelloWorld.xlsx' NO INTERVALS.
+SELECTION-SCREEN PUSHBUTTON /1(50) a2x_text USER-COMMAND a2x.
 PARAMETERS p_prefix TYPE string LOWER CASE DEFAULT 'new'.
 PARAMETERS p_input TYPE string LOWER CASE DEFAULT 'C:\Users\sandra.rossi\Documents\SAP GUI\'.
 PARAMETERS p_output TYPE string LOWER CASE DEFAULT 'C:\Users\sandra.rossi\Documents\SAP GUI\fromReader_'.
+
+LOAD-OF-PROGRAM.
+  a2x_text = 'Initialize list of abap2xlsx demo files'(001).
+  DATA(app) = NEW lcl_app( ).
+  app->set_ref_sscrfields( REF #( sscrfields ) ).
+
+AT SELECTION-SCREEN.
+  TRY.
+      app->at_selection_screen( ).
+    CATCH cx_root INTO DATA(error).
+      MESSAGE error TYPE 'I' DISPLAY LIKE 'E'.
+  ENDTRY.
+  ASSERT 1 = 1. " debug helper
 
 START-OF-SELECTION.
   TRY.

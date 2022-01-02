@@ -3,6 +3,7 @@
   <xsl:strip-space elements="*"/>
 
   <xsl:param name="NEW"/>
+  <xsl:param name="ATTRIBUTES"/>
 
   <xsl:template match="/">
     <xsl:apply-templates select="*|text()|@*"/>
@@ -36,6 +37,16 @@
     <xsl:variable name="AttributeValue">
       <xsl:value-of select="string(.)"/>
     </xsl:variable>
+    <xsl:variable name="DoesAttributeValueContainNamespacePrefixes">
+      <xsl:call-template name="DoesAttributeValueContainNamespacePrefixes">
+        <xsl:with-param name="attribute" select="."/>
+      </xsl:call-template>
+    </xsl:variable>
+    <xsl:variable name="DoesAttributeValueContainQName">
+      <xsl:call-template name="DoesAttributeValueContainQName">
+        <xsl:with-param name="attribute" select="."/>
+      </xsl:call-template>
+    </xsl:variable>
     <xsl:choose>
       <xsl:when test="starts-with(name(),'xmlns:')">
         <xsl:attribute name="xmlns:{$NEW}{substring-after(name(),'xmlns:')}" namespace="{namespace-uri()}">
@@ -48,7 +59,7 @@
           <xsl:value-of select="$AttributeValue"/>
         </xsl:attribute>
       </xsl:when>
-      <xsl:when test="local-name()='Ignorable' and namespace-uri()='http://schemas.openxmlformats.org/markup-compatibility/2006'">
+      <xsl:when test="$DoesAttributeValueContainNamespacePrefixes!=''">
         <xsl:variable name="NEWNamespacePrefixes">
           <xsl:call-template name="string-replace-all">
             <xsl:with-param name="text">
@@ -66,8 +77,13 @@
         <xsl:attribute name="{$NEW}{name()}" namespace="{namespace-uri()}">
           <xsl:value-of select="concat($NEW,$NEWNamespacePrefixes)"/>
         </xsl:attribute>
+        <xsl:call-template name="define-dummy-attributes">
+          <xsl:with-param name="NEWNamespacePrefixes">
+            <xsl:value-of select="concat($NEW,$NEWNamespacePrefixes)"/>
+          </xsl:with-param>
+        </xsl:call-template>
       </xsl:when>
-      <xsl:when test="local-name()='Requires' and local-name(..)='Choice' and namespace-uri(..)='http://schemas.openxmlformats.org/markup-compatibility/2006'">
+      <!--<xsl:when test="local-name()='Requires' and local-name(..)='Choice' and namespace-uri(..)='http://schemas.openxmlformats.org/markup-compatibility/2006'">
         <xsl:attribute name="{local-name()}" namespace="{namespace-uri()}">
           <xsl:value-of select="concat($NEW,$AttributeValue)"/>
         </xsl:attribute>
@@ -75,8 +91,9 @@
           <xsl:value-of select="namespace-uri(//*/@*[substring-before(name(),':')=$AttributeValue])"/>
         </xsl:variable>
         <xsl:attribute name="{$NEW}{$AttributeValue}:dummy" namespace="{$Namespace2}"/>
-      </xsl:when>
-      <xsl:when test="local-name()='type' and namespace-uri()='http://www.w3.org/2001/XMLSchema-instance'">
+      </xsl:when>-->
+      <!--<xsl:when test="local-name()='type' and namespace-uri()='http://www.w3.org/2001/XMLSchema-instance'">-->
+      <xsl:when test="$DoesAttributeValueContainQName!=''">
         <xsl:attribute name="{$NEW}{name()}" namespace="{namespace-uri()}">
           <xsl:value-of select="concat($NEW,$AttributeValue)"/>
         </xsl:attribute>
@@ -99,6 +116,24 @@
     </xsl:choose>
   </xsl:template>
 
+  <!-- =============  ============= -->
+  <xsl:template name="DoesAttributeValueContainNamespacePrefixes">
+    <xsl:param name="attribute"/>
+    <xsl:for-each select="$ATTRIBUTES[@valueContainingNamespacePrefixes='1' and local-name($attribute)=@localName and namespace-uri($attribute)=@localNamespaceUri
+                            and (string(@parentLocalName)='' or (local-name($attribute/..)=@parentLocalName and namespace-uri($attribute/..)=@parentNamespaceUri))]">
+      X
+    </xsl:for-each>
+  </xsl:template>
+
+  <!-- =============  ============= -->
+  <xsl:template name="DoesAttributeValueContainQName">
+    <xsl:param name="attribute"/>
+    <xsl:for-each select="$ATTRIBUTES[@valueContainingQName='1' and local-name($attribute)=@localName and namespace-uri($attribute)=@localNamespaceUri
+                            and (string(@parentLocalName)='' or (local-name($attribute/..)=@parentLocalName and namespace-uri($attribute/..)=@parentNamespaceUri))]">
+      X
+    </xsl:for-each>
+  </xsl:template>
+
   <!-- ============= STRING-REPLACE-ALL ============= -->
   <!-- copyright http://geekswithblogs.net/Erik/archive/2008/04/01/120915.aspx -->
   <xsl:template name="string-replace-all">
@@ -117,6 +152,22 @@
       </xsl:when>
       <xsl:otherwise>
         <xsl:value-of select="$text"/>
+      </xsl:otherwise>
+    </xsl:choose>
+  </xsl:template>
+
+  <!-- ============= DEFINE-DUMMY-ATTRIBUTES ============= -->
+  <xsl:template name="define-dummy-attributes">
+    <xsl:param name="NEWNamespacePrefixes"/>
+    <xsl:choose>
+      <xsl:when test="contains(NEWNamespacePrefixes, ' ')">
+        <xsl:call-template name="string-replace-all">
+          <xsl:with-param name="NEWNamespacePrefixes" select="substring-after($NEWNamespacePrefixes,' ')"/>
+        </xsl:call-template>
+      </xsl:when>
+      <xsl:otherwise>
+        <xsl:attribute name="{concat($NEWNamespacePrefixes,':dummy')}" namespace="{../namespace::*[name()=substring-after($NEWNamespacePrefixes,$NEW)]}"/>
+        <!--<xsl:attribute name="concat($NEWNamespacePrefixes,':dummy'" namespace="http://aaaaa"/>-->
       </xsl:otherwise>
     </xsl:choose>
   </xsl:template>
